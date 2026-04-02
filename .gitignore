@@ -1,0 +1,66 @@
+# Environment variables (NEVER commit these!)
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Backend dependencies
+backend/node_modules/
+backend/package-lock.json
+backend/yarn.lock
+
+# Frontend dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+dist/
+backend/build/
+*.tsbuildinfo
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Development
+.next/
+out/
+.cache/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Testing
+.nyc_output/
+coverage/
+
+# Misc
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: smatq-store-backend
+    runtime: node
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "5002"
+      - key: FRONTEND_URL
+        scope: pr-deploy,preview,production
+        value: https://your-smatq-store.vercel.app
+      - key: SNIPPE_API_KEY
+        scope: preview,production
+        sync: false
+        description: "Get from https://dashboard.clickpesa.com"
+      - key: SNIPPE_BASE_URL
+        value: https://api.snippe.sh
+      - key: SNIPPE_WEBHOOK_SECRET
+        scope: preview,production
+        sync: false
+        description: "Generate and set in Snippe webhook settings"
+      - key: WEBHOOK_URL
+        scope: preview,production
+        sync: false
+        description: "Will auto-generate from Render URL if not set"

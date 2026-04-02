@@ -1,0 +1,214 @@
+🚀 ClickPesa API Integration Guide (Clean Version)
+1. Overview
+
+This guide helps you integrate ClickPesa APIs into your application. You’ll learn how to:
+
+Set up your application
+Authenticate API requests
+Handle webhooks (real-time updates)
+Secure your integration
+Understand transaction statuses
+🔐 2. Authentication & Security
+2.1 Credentials
+
+You need the following:
+
+Client ID → Found in your app settings
+API Key → Shown once during creation (store securely)
+JWT Token → Used for API requests (expires in 1 hour)
+🔁 How Authentication Works
+Use Client ID + API Key
+Exchange them for a JWT Token
+Use the JWT Token in all API requests
+Refresh token after 60 minutes
+2.2 Security Best Practices
+Never expose API keys publicly
+Always use HTTPS
+Store credentials securely (e.g., environment variables)
+2.3 Rate Limits
+120 requests per minute per IP
+If exceeded → requests are throttled
+
+👉 Recommended:
+
+Implement retry logic with exponential backoff
+⚙️ 3. Application Setup
+Step-by-Step
+Step 1: Login
+Go to ClickPesa Dashboard
+Step 2: Open Developer Settings
+Navigate: Settings → Developers
+Step 3: Create Application
+Click Create Application
+Step 4: Configure App
+
+Provide:
+
+Application Name
+Integration Type → API
+Features → (Payment API, Payout API, etc.)
+Step 5: Submit
+Click Create
+🔑 4. Managing API Keys
+4.1 View API Keys
+Go to Settings → Developers
+Select your application
+Click Manage API Keys
+
+You’ll see:
+
+Name
+Last Activity
+Revoke option
+4.2 Create API Key
+Click Add API Key
+Enter:
+Name
+Expiry Date
+Confirm with password
+
+👉 You will receive:
+
+Client ID
+API Key (copy immediately)
+🔔 5. Webhooks (Real-Time Updates)
+5.1 What Are Webhooks?
+
+Webhooks are HTTP POST callbacks sent when events happen (e.g., payment success).
+
+5.2 Webhook Levels
+Level	Scope	Usage
+Merchant	All transactions	Default
+Application	API transactions only	Recommended for API apps
+
+👉 If app webhook exists → it overrides merchant webhook
+
+5.3 Supported Events
+PAYMENT RECEIVED
+PAYMENT FAILED
+PAYOUT INITIATED
+PAYOUT REFUNDED
+PAYOUT REVERSED
+DEPOSIT RECEIVED (merchant only)
+5.4 Example Webhook Payload
+{
+  "event": "PAYMENT RECEIVED",
+  "data": {
+    "id": "ORD123",
+    "status": "SUCCESS",
+    "collectedAmount": "10000",
+    "collectedCurrency": "TZS",
+    "customer": {
+      "customerName": "John Doe",
+      "customerEmail": "john@example.com"
+    }
+  }
+}
+5.5 Setting Up Webhooks
+Merchant-Level
+Go to Settings → Developers
+Find Webhooks
+Add URL per event
+Application-Level
+Open your application
+Add webhook URLs per event
+5.6 Handling Webhooks
+ClickPesa sends HTTP POST
+Your server must return HTTP 2xx
+
+⚠️ Important:
+
+2xx = received (NOT processed)
+Validate payload using checksum
+🔐 6. IP Whitelisting
+What It Does
+
+Restricts API access to trusted IPs only.
+
+Setup
+Go to Settings → Developers
+Add allowed IP addresses
+Behavior
+No IPs → open access
+With IPs → only listed IPs allowed
+
+⚠️ Note:
+
+API Explorer stops working when enabled
+🔑 7. Checksum (Data Integrity)
+Why It Matters
+
+Ensures:
+
+Requests are not tampered
+Webhooks are authentic
+⚠️ Important Rules
+Exclude:
+checksum
+checksumMethod
+Regenerate tokens after enabling/disabling checksum
+7.1 How It Works
+Sort payload keys (alphabetically)
+Convert to JSON string
+Generate HMAC-SHA256
+Return hex string
+Example (JavaScript)
+const crypto = require("crypto");
+
+function createChecksum(key, payload) {
+  const sorted = JSON.stringify(payload);
+  return crypto.createHmac("sha256", key)
+               .update(sorted)
+               .digest("hex");
+}
+7.2 Validation
+Remove checksum fields
+Recompute checksum
+Compare values
+Match → valid
+Not match → reject
+📊 8. Payment Statuses
+Status	Meaning
+SUCCESS	Payment received
+SETTLED	Funds transferred
+PROCESSING	In progress
+PENDING	Awaiting action
+FAILED	Failed
+ON-HOLD	Needs review
+REFUNDED	Returned before settlement
+REVERSED	Returned after settlement
+How to Receive Status
+Webhooks (recommended)
+API polling
+💸 9. Payout Statuses
+Status	Meaning
+AUTHORIZED	Starting
+SUCCESS	Initiated
+PROCESSING	In progress
+REFUNDED	System error
+REVERSED	Provider error
+🔌 10. Integration Options
+1. API Integration
+Full control
+Developer-focused
+2. Hosted Checkout
+Redirect users to ClickPesa page
+Easy setup
+3. Embedded Integration
+Seamless in-app experience
+⚡ 11. Quickstart Summary
+To integrate quickly:
+Create application
+Generate API key
+Authenticate → get JWT
+Call APIs
+Configure webhooks
+Add security:
+IP whitelist
+Checksum
+🧠 Final Tips for Developers
+Always rely on webhooks (not polling)
+Handle retries safely
+Log all webhook events
+Test in sandbox before production
+Secure everything (keys, IP, checksum)
