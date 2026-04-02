@@ -10,7 +10,6 @@ export default function PaymentPendingPage() {
   const amount = searchParams.get('amount') || '0';
   const paymentId = searchParams.get('paymentId') || '';
   const [status, setStatus] = useState<'pending' | 'completed' | 'failed' | null>(null);
-  const [pollCount, setPollCount] = useState(0);
 
   useEffect(() => {
     if (!paymentId) {
@@ -32,7 +31,6 @@ export default function PaymentPendingPage() {
       } catch {
         // Keep polling
       }
-      setPollCount((c) => c + 1);
     };
 
     checkStatus();
