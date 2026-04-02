@@ -1,12 +1,6 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "env": {
-    "VITE_API_URL": {
-      "description": "Backend API URL - set this to your Render backend URL",
-      "example": "https://your-smatq-backend.onrender.com"
-    }
-  },
   "rewrites": [
     {
       "source": "/(.*)",
