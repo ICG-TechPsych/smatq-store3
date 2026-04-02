@@ -7,6 +7,7 @@ import paymentRoutes from './routes/payments.js';
 import webhookRoutes from './routes/webhooks.js';
 import productRoutes from './routes/products.js';
 import orderRoutes from './routes/orders.js';
+import { initializeDatabase, seedDefaultProducts } from './db/schema.js';
 
 const app = express();
 const PORT = process.env.PORT || 5002;
@@ -44,7 +45,23 @@ app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Backend server running on http://localhost:${PORT}`);
-  console.log(`🔐 Snippe Integration Ready`);
-});
+// Initialize database and start server
+(async () => {
+  try {
+    await initializeDatabase();
+    await seedDefaultProducts();
+    console.log('✅ Database initialized and ready');
+  } catch (error) {
+    console.error('❌ Database initialization failed:', error);
+    if (process.env.NODE_ENV === 'production') {
+      // In production, continue anyway - tables might already exist
+      console.log('Continuing despite error...');
+    }
+  }
+
+  app.listen(PORT, () => {
+    console.log(`✅ Backend server running on http://localhost:${PORT}`);
+    console.log(`🔐 Snippe Integration Ready`);
+    console.log(`📦 Database: PostgreSQL`);
+  });
+})();

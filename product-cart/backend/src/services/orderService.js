@@ -1,43 +1,17 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '../../data');
-const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
-const PAYMENTS_FILE = path.join(DATA_DIR, 'payments.json');
-const PENDING_ORDERS_FILE = path.join(DATA_DIR, 'pending_orders.json');
-
-// Ensure data directory exists
-const ensureDataDir = async () => {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-  } catch (error) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('Error creating data directory:', error);
-    }
-  }
-};
+import pool from '../db/database.js';
 
 /**
  * Save pending order (cart + customer) before payment - for webhook to use
  */
 export const savePendingOrder = async (orderReference, { cartItems, customerAddress }) => {
   try {
-    await ensureDataDir();
-    let pending = {};
-    try {
-      const data = await fs.readFile(PENDING_ORDERS_FILE, 'utf-8');
-      pending = JSON.parse(data);
-    } catch {
-      pending = {};
-    }
-    pending[orderReference] = { cartItems: cartItems || [], customerAddress: customerAddress || '', savedAt: new Date().toISOString() };
-    await fs.writeFile(PENDING_ORDERS_FILE, JSON.stringify(pending, null, 2));
+    await pool.query(
+      'INSERT INTO pending_orders (order_reference, cart_items, customer_address) VALUES ($1, $2, $3) ON CONFLICT (order_reference) DO UPDATE SET cart_items = $2, customer_address = $3',
+      [orderReference, JSON.stringify(cartItems), customerAddress || '']
+    );
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('Error saving pending order:', error);
-    }
+    console.error('Error saving pending order:', error);
+    throw error;
   }
 };
 
@@ -46,13 +20,27 @@ export const savePendingOrder = async (orderReference, { cartItems, customerAddr
  */
 export const getAndRemovePendingOrder = async (orderReference) => {
   try {
-    const data = await fs.readFile(PENDING_ORDERS_FILE, 'utf-8');
-    const pending = JSON.parse(data);
-    const entry = pending[orderReference];
-    delete pending[orderReference];
-    await fs.writeFile(PENDING_ORDERS_FILE, JSON.stringify(pending, null, 2));
-    return entry;
-  } catch {
+    const result = await pool.query(
+      'SELECT cart_items, customer_address FROM pending_orders WHERE order_reference = $1',
+      [orderReference]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const entry = result.rows[0];
+    const pendingOrder = {
+      cartItems: entry.cart_items || [],
+      customerAddress: entry.customer_address || '',
+    };
+
+    // Delete after retrieval
+    await pool.query('DELETE FROM pending_orders WHERE order_reference = $1', [orderReference]);
+
+    return pendingOrder;
+  } catch (error) {
+    console.error('Error getting pending order:', error);
     return null;
   }
 };
@@ -62,35 +50,41 @@ export const getAndRemovePendingOrder = async (orderReference) => {
  */
 export const savePaymentRecord = async (paymentData) => {
   try {
-    await ensureDataDir();
-    let payments = [];
-    
-    try {
-      const data = await fs.readFile(PAYMENTS_FILE, 'utf-8');
-      payments = JSON.parse(data);
-    } catch (error) {
-      payments = [];
-    }
+    const paymentId = paymentData.id || paymentData.orderReference;
 
-    const payment = {
-      id: paymentData.id || paymentData.orderReference,
-      orderReference: paymentData.orderReference,
-      paymentReference: paymentData.paymentReference,
-      amount: paymentData.amount,
-      currency: paymentData.currency || 'TZS',
-      status: paymentData.status,
-      customerName: paymentData.customerName,
-      customerEmail: paymentData.customerEmail,
-      customerPhoneNumber: paymentData.customerPhoneNumber,
-      channel: paymentData.channel,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      rawData: paymentData
+    const result = await pool.query(
+      `INSERT INTO payments (id, order_reference, payment_reference, amount, currency, status, customer_name, customer_email, customer_phone, channel, raw_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (id) DO UPDATE SET status = $6, updated_at = CURRENT_TIMESTAMP
+       RETURNING id, order_reference, payment_reference, amount, currency, status, customer_name, customer_email, customer_phone, channel`,
+      [
+        paymentId,
+        paymentData.orderReference,
+        paymentData.paymentReference,
+        paymentData.amount,
+        paymentData.currency || 'TZS',
+        paymentData.status,
+        paymentData.customerName,
+        paymentData.customerEmail,
+        paymentData.customerPhoneNumber,
+        paymentData.channel,
+        JSON.stringify(paymentData),
+      ]
+    );
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      orderReference: row.order_reference,
+      paymentReference: row.payment_reference,
+      amount: row.amount,
+      currency: row.currency,
+      status: row.status,
+      customerName: row.customer_name,
+      customerEmail: row.customer_email,
+      customerPhoneNumber: row.customer_phone,
+      channel: row.channel,
     };
-
-    payments.push(payment);
-    await fs.writeFile(PAYMENTS_FILE, JSON.stringify(payments, null, 2));
-    return payment;
   } catch (error) {
     console.error('Error saving payment record:', error);
     throw error;
@@ -102,42 +96,40 @@ export const savePaymentRecord = async (paymentData) => {
  */
 export const createOrderFromPayment = async (paymentData, cartItems) => {
   try {
-    await ensureDataDir();
-    let orders = [];
-    
-    try {
-      const data = await fs.readFile(ORDERS_FILE, 'utf-8');
-      orders = JSON.parse(data);
-    } catch (error) {
-      orders = [];
-    }
-
     // Generate unique order token
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
     const orderToken = `ORD-${timestamp}-${random}`;
 
+    const result = await pool.query(
+      `INSERT INTO orders (id, customer_name, customer_email, customer_phone, location, items, total_price, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, customer_name, customer_email, customer_phone, location, items, total_price, status, created_at`,
+      [
+        orderToken,
+        paymentData.customerName,
+        paymentData.customerEmail,
+        paymentData.customerPhoneNumber,
+        paymentData.customerAddress || '',
+        JSON.stringify(cartItems),
+        paymentData.amount,
+        'completed',
+      ]
+    );
+
+    const row = result.rows[0];
     const order = {
-      id: orderToken,
-      orderReference: paymentData.orderReference,
-      paymentReference: paymentData.paymentReference,
-      customerName: paymentData.customerName,
-      customerEmail: paymentData.customerEmail,
-      customerPhoneNumber: paymentData.customerPhoneNumber,
-      location: paymentData.customerAddress || '',
-      items: cartItems,
-      totalPrice: paymentData.amount,
-      currency: paymentData.currency || 'TZS',
-      status: 'completed',
-      paymentStatus: paymentData.status,
-      channel: paymentData.channel,
-      createdAt: new Date().toISOString(),
-      notes: `Payment received via ${paymentData.channel || 'Snippe'}`
+      id: row.id,
+      customerName: row.customer_name,
+      customerEmail: row.customer_email,
+      customerPhoneNumber: row.customer_phone,
+      location: row.location,
+      items: row.items,
+      totalPrice: parseFloat(row.total_price),
+      status: row.status,
+      createdAt: row.created_at,
     };
 
-    orders.push(order);
-    await fs.writeFile(ORDERS_FILE, JSON.stringify(orders, null, 2));
-    
     console.log(`✅ Order created: ${orderToken}`);
     return order;
   } catch (error) {
@@ -151,14 +143,24 @@ export const createOrderFromPayment = async (paymentData, cartItems) => {
  */
 export const getOrders = async () => {
   try {
-    await ensureDataDir();
-    const data = await fs.readFile(ORDERS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    // File may not exist yet
-    try {
-      await fs.writeFile(ORDERS_FILE, '[]');
-    } catch (e) { /* ignore */ }
+    const result = await pool.query(
+      'SELECT id, customer_name, customer_email, customer_phone, location, items, total_price, status, created_at, updated_at FROM orders ORDER BY created_at DESC'
+    );
+
+    return result.rows.map(row => ({
+      id: row.id,
+      customerName: row.customer_name,
+      customerEmail: row.customer_email,
+      customerPhoneNumber: row.customer_phone,
+      location: row.location,
+      items: row.items,
+      totalPrice: parseFloat(row.total_price),
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  } catch (error) {
+    console.error('Error getting orders:', error);
     return [];
   }
 };
@@ -168,21 +170,31 @@ export const getOrders = async () => {
  */
 export const updateOrderStatus = async (orderId, status) => {
   try {
-    await ensureDataDir();
-    const data = await fs.readFile(ORDERS_FILE, 'utf-8');
-    const orders = JSON.parse(data);
-    const order = orders.find((o) => o.id === orderId || o.orderReference === orderId);
-    if (order) {
-      order.status = status;
-      order.updatedAt = new Date().toISOString();
-      await fs.writeFile(ORDERS_FILE, JSON.stringify(orders, null, 2));
-      return order;
+    const result = await pool.query(
+      `UPDATE orders SET status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1 OR customer_name = $1
+       RETURNING id, customer_name, customer_email, customer_phone, location, items, total_price, status, created_at, updated_at`,
+      [orderId, status]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
     }
-    return null;
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      customerName: row.customer_name,
+      customerEmail: row.customer_email,
+      customerPhoneNumber: row.customer_phone,
+      location: row.location,
+      items: row.items,
+      totalPrice: parseFloat(row.total_price),
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('Error updating order:', error);
-    }
+    console.error('Error updating order:', error);
     throw error;
   }
 };
@@ -192,12 +204,25 @@ export const updateOrderStatus = async (orderId, status) => {
  */
 export const getPaymentRecords = async () => {
   try {
-    await ensureDataDir();
-    const data = await fs.readFile(PAYMENTS_FILE, 'utf-8');
-    return JSON.parse(data);
+    const result = await pool.query(
+      'SELECT id, order_reference, payment_reference, amount, currency, status, customer_name, created_at FROM payments ORDER BY created_at DESC'
+    );
+
+    return result.rows.map(row => ({
+      id: row.id,
+      orderReference: row.order_reference,
+      paymentReference: row.payment_reference,
+      amount: parseFloat(row.amount),
+      currency: row.currency,
+      status: row.status,
+      customerName: row.customer_name,
+      createdAt: row.created_at,
+    }));
   } catch (error) {
+    console.error('Error getting payment records:', error);
     return [];
   }
+};
 };
 
 /**
