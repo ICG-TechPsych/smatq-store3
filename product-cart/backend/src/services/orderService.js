@@ -223,7 +223,6 @@ export const getPaymentRecords = async () => {
     return [];
   }
 };
-};
 
 /**
  * Update payment status from webhook
